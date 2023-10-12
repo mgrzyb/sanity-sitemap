@@ -1,0 +1,12 @@
+﻿{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "outDir": "./dist",
+    "declaration": true,
+    "sourceMap": true,
+    "strict": false
+  },
+  "include": ["src"],
+  "exclude": ["node_modules"]
+}

@@ -1,0 +1,30 @@
+{
+  "name": "sanity-sitemap-next",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/**/*"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "clean": "rm -rf ./dist/",
+    "yalc-publish": "npm run build && yalc publish"
+  },
+  "author": "",
+  "license": "ISC",
+  "peerDependencies": {
+    "react": "^18.2.0",
+    "next-sanity": "^5.5.4"
+  },
+  "devDependencies": {
+    "yalc": "^1.0.0-pre.53",
+    "typescript": "^5.2.2",
+    "react": "^18.2.0",
+    "@types/react": "^18.2.25",
+    "next-sanity": "^5.5.4"
+  }
+}
