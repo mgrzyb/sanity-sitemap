@@ -2,6 +2,7 @@
 import {Page} from "./Page.js";
 import {Any, QueryParams} from "@sanity/client";
 
+// TODO: Better name - technically this returns [...ancestors, page]
 export async function fetchAncestors(fetch: FetchFunction, sitemapRoot: SitemapNodeData, pageId : string) {
     const ancestorNodes = getAncestorNodes(sitemapRoot, pageId)
     if (!ancestorNodes)
@@ -32,11 +33,11 @@ export function matchSitemapSegments(sitemapRoot: SitemapNodeData, homePage : Pa
 
     return {
         matchedPath: matchedPath,
-        rest: remainingSegments
+        unmatchedSegments: remainingSegments
     }
 }
 
-function getAncestorNodes(sitemapRoot: SitemapNodeData, pageId: string) {
+export function getAncestorNodes(sitemapRoot: SitemapNodeData, pageId: string) {
 
     function findNode(nodes: SitemapNodeData[], predicate: (node: SitemapNodeData) => boolean, path: SitemapNodeData[] = []) : SitemapNodeData[] | undefined {
         for (const n of nodes) {
