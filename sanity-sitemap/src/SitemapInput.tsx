@@ -54,25 +54,39 @@ export const SitemapInput = ({value, onChange, schemaType}: ArrayOfObjectsInputP
     }
   };
 
-  const [state, setState] = useState<{ tree: SitemapTreeRoot, nodes: SitemapTreeNode[], refs: Set<string> }>(() => {
-
-    const [tree, refs] = getTreeFromNodeData(value ?? [], getNodeTitleFactory(contextMenuCallbacks));
+  const [state, setState] = useState<{ tree: SitemapTreeRoot, nodes: SitemapTreeNode[], pendingRefs: Set<string> }>(() => {
+    console.log("INITIAL State")
+    const [tree, pendingRefs] = getTreeFromNodeData(value ?? [], getNodeTitleFactory(contextMenuCallbacks), loadedPages.current);
 
     return {
       tree: tree,
       nodes: tree.children,
-      refs: refs
+      pendingRefs: pendingRefs
     }
   });
 
   useEffect(() => {
-    if (state.refs.size === 0)
+    console.log("Value CHANGED")
+    const [tree, pendingRefs] = getTreeFromNodeData(value ?? [], getNodeTitleFactory(contextMenuCallbacks), loadedPages.current);
+    setState({
+      tree: tree,
+      nodes: [...tree.children],
+      pendingRefs: pendingRefs
+    })
+  }, [value]);
+
+  console.log("RERENDER: value === state.tree.data: ", value === state.tree.data)
+
+  useEffect(() => {
+    if (state.pendingRefs.size === 0)
       return;
-    const refs = [...state.refs].filter(r => !loadedPages.current.has(r));
-    if (refs.length === 0)
+    const refsToLoad = [...state.pendingRefs].filter(r => !loadedPages.current.has(r));
+    if (refsToLoad.length === 0)
       return;
 
-    loadPages(refs, client)
+    console.log("LOADING pendingRefs")
+
+    loadPages(refsToLoad, client)
       .then(pages => {
         for (const d of pages) {
           loadedPages.current.set(d[0], d[1])
@@ -81,7 +95,7 @@ export const SitemapInput = ({value, onChange, schemaType}: ArrayOfObjectsInputP
         updateTree(state.tree, loadedPages.current);
         setState({...state, nodes: [...state.tree.children]});
       })
-  }, [state]);
+  }, [state.pendingRefs]);
 
   const onDrop = useCallback(function onDrop(info : NodeDragEventParams<SitemapTreeNode> & { dragNode: EventDataNode<SitemapTreeNode>, dropPosition: number, dropToGap: boolean }) {
     const dropNode = getNodeByKey(state.tree, info.node.key)!;
@@ -122,12 +136,12 @@ export const SitemapInput = ({value, onChange, schemaType}: ArrayOfObjectsInputP
         <SelectPageDialog
           pageTypes={pageTypes}
           onSelect={doc => {
-            addNode(state.tree, doc, getNodeTitleFactory(contextMenuCallbacks));
+            const patch = addNode(state.tree, doc, getNodeTitleFactory(contextMenuCallbacks));
             setState({
               ...state,
               nodes: [...state.tree.children],
             });
-            onChange(set(state.tree.data));
+            onChange(patch);
           }}
           onClose={() => setAddingHomePage(false)}
         />}
@@ -136,12 +150,12 @@ export const SitemapInput = ({value, onChange, schemaType}: ArrayOfObjectsInputP
         <SelectPageDialog
           pageTypes={pageTypes}
           onSelect={doc => {
-            addNode(addingChildNode, doc, getNodeTitleFactory(contextMenuCallbacks));
+            const patch = addNode(addingChildNode, doc, getNodeTitleFactory(contextMenuCallbacks));
             setState({
               ...state,
               nodes: [...state.tree.children],
             });
-            onChange(set(state.tree.data));
+            onChange(patch);
           }}
           onClose={() => setAddingChildNode(undefined)}
         />}
