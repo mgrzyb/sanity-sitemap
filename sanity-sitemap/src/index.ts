@@ -1,6 +1,6 @@
 import {definePlugin, PluginOptions, RuleDef} from 'sanity'
 import { SitemapInput } from './SitemapInput';
-export * from "./SitemapPane";
+//export * from "./SitemapPane";
 
 
 interface MyPluginConfig {

@@ -1,11 +1,12 @@
 {
-  "name": "sanity-plugin-sitemap",
-  "version": "1.0.0",
+  "name": "@mgrzyb/sanity-plugin-sitemap",
+  "version": "0.0.1",
   "description": "",
   "keywords": [
     "sanity",
     "sanity-plugin"
   ],
+  "publishConfig": { "access": "public" },
   "license": "MIT",
   "author": "Maciej Grzyb <maciejgrzyb@gmail.com>",
   "exports": {
