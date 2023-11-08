@@ -14,10 +14,10 @@ export async function fetchAncestors(
 
     const pages = await fetchPagesByIds(
         fetch,
-        ancestorNodes.map((n) => n.document._ref),
+        ancestorNodes.map((n) => n.page._ref),
         pagesCache,
     );
-    return ancestorNodes.map((n) => pages.find((p) => p._id === n.document._ref)!);
+    return ancestorNodes.map((n) => pages.find((p) => p._id === n.page._ref)!);
 }
 
 export function matchSitemapSegments(
@@ -29,20 +29,20 @@ export function matchSitemapSegments(
     const matchedPath: SitemapPage[] = [homePage];
     const remainingSegments = [...segments];
 
-    let nodes = sitemapRoot.children ?? [];
+    let nodes = sitemapRoot.children.type === "nodes" ? sitemapRoot.children.nodes : [];
     for (const segment of segments) {
         const pageCandidates = pages.filter((p) => p.slug.toLowerCase() === segment.toLowerCase());
         if (!pageCandidates.length) break;
 
         let matched = false;
         for (const page of pageCandidates) {
-            const node = nodes.find((n) => n.document._ref === page._id);
+            const node = nodes.find((n) => n.page._ref === page._id);
             if (!node) continue;
 
             matched = true;
             matchedPath.push(page);
             remainingSegments.splice(0, 1);
-            nodes = node.children ?? [];
+            nodes = node.children.type === "nodes" ? node.children.nodes : [];
             break;
         }
         
@@ -64,15 +64,15 @@ export function getAncestorNodes(sitemapRoot: SitemapNodeData, pageId: string) {
     ): SitemapNodeData[] | undefined {
         for (const n of nodes) {
             if (predicate(n)) return [...path, n];
-            const r = n.children && findNode(n.children, predicate, [...path, n]);
+            const r = n.children.type === "nodes" && findNode(n.children.nodes, predicate, [...path, n]);
             if (r) return r;
         }
         return undefined;
     }
 
-    if (sitemapRoot.document._ref === pageId) return [];
+    if (sitemapRoot.page._ref === pageId) return [];
 
-    const path = findNode(sitemapRoot.children ?? [], (n) => n.document._ref === pageId);
+    const path = findNode(sitemapRoot.children.type === "nodes" ? sitemapRoot.children.nodes : [], (n) => n.page._ref === pageId);
 
     return path ? [sitemapRoot, ...path] : undefined;
 }

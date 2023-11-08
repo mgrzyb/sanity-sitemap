@@ -1,6 +1,6 @@
 ﻿import {BasicDataNode} from "rc-tree";
 import React, {ReactNode} from "react";
-import {insert, setIfMissing, unset} from "sanity";
+import {insert, set, setIfMissing, unset} from "sanity";
 import {SitemapNodeData} from "./SitemapNodeData";
 import {nanoid} from "nanoid/non-secure";
 import {SitemapPage} from "./SitemapPage";
@@ -12,18 +12,37 @@ export type SitemapTreeRoot = BasicDataNode & {
   children: SitemapTreeNode[]
 }
 
-export type SitemapTreeNode = BasicDataNode & {
-  kind: 'node',
+export type SitemapTreeNode = SitemapTreePageNode | SitemapTreeCollectionNode;
+
+export type SitemapTreePageNode = BasicDataNode & {
+  kind: 'page',
   key: string | number
   title?: React.ReactNode | ((data: SitemapTreeNode) => React.ReactNode)
   page: SitemapPage | undefined,
   data: SitemapNodeData,
-  parent: SitemapTreeRoot | SitemapTreeNode,
-  children: SitemapTreeNode[]
+  parent: SitemapTreeRoot | SitemapTreePageNode,
+  children: (SitemapTreeNode | SitemapTreeCollectionNode)[]
 }
 
-export function getNodeByKey(root: SitemapTreeRoot, key: string | number) {
-  return findNodeRecursively(root.children, key);
+export type SitemapTreeCollectionNode = BasicDataNode & {
+  kind: 'collection'
+  key: string | number
+  title?: React.ReactNode | ((data: SitemapTreeNode) => React.ReactNode)
+  collectionType: string
+  parent: SitemapTreePageNode
+}
+
+export function getPageNodeByKey(rootOrNodes : SitemapTreeRoot | SitemapTreeNode[], key: string | number) {
+  const n = getNodeByKey(rootOrNodes, key);
+  if (n?.kind !== 'page')
+    return undefined;
+  return n;
+}
+
+export function getNodeByKey(rootOrNodes: SitemapTreeRoot | SitemapTreeNode[], key: string | number) {
+  if (Array.isArray(rootOrNodes))
+    return findNodeRecursively(rootOrNodes, key);
+  return findNodeRecursively(rootOrNodes.children, key);
 }
 
 function findNodeRecursively(nodes: SitemapTreeNode[], key: string | number): SitemapTreeNode | undefined {
@@ -31,7 +50,7 @@ function findNodeRecursively(nodes: SitemapTreeNode[], key: string | number): Si
     if (n.key === key)
       return n;
 
-    if (n.children) {
+    if (n.kind === "page" && n.children) {
       const m = findNodeRecursively(n.children, key)
       if (m)
         return m;
@@ -40,94 +59,66 @@ function findNodeRecursively(nodes: SitemapTreeNode[], key: string | number): Si
   return undefined;
 }
 
-function getAncestors(node: SitemapTreeNode): SitemapTreeNode[] {
+function getAncestors(node: SitemapTreeNode): SitemapTreePageNode[] {
   if (node.parent.kind === 'root')
     return [];
   return [...getAncestors(node.parent), node.parent]
 }
 
-function getNodePath(node: SitemapTreeNode) {
+function getNodePath(node: SitemapTreePageNode) {
   const ancestors = getAncestors(node);
-  return [...ancestors.flatMap(n => [{_key: n.data._key}, 'children']), {_key: node.data._key}]
+  return [...ancestors.flatMap(n => [{_key: n.data._key}, 'children', 'nodes']), {_key: node.data._key}]
 }
 
-export function addNode(parent: SitemapTreeNode | SitemapTreeRoot, page: SitemapPage, titleFactory: (node: SitemapTreeNode) => ReactNode) {
+export function addChildPageNode(parent: SitemapTreePageNode | SitemapTreeRoot, page: SitemapPage) {
   const data: SitemapNodeData = {
     _key: nanoid(10).toString(),
-    document: {
+    page: {
       _ref: page.id,
       _type: 'reference'
-    },
-    children: undefined
+    }
   };
 
-  const childNode: SitemapTreeNode = {
-    kind: 'node',
-    key: data._key,
-    data: data,
-    page: page,
-    parent: parent,
-    children: []
-  };
-
-  childNode.title = titleFactory;
-
-  parent.children.push(childNode)
   if (parent.kind === 'root') {
-//    parent.data.push(data)
     return [
-      setIfMissing([], ['children']),
-      insert([data], 'after', ['children', -1])
+      setIfMissing([], []),
+      insert([data], 'after', [-1])
     ];
   } else {
-//    parent.data.children = parent.data.children || [];
-//    parent.data.children.push(data)
-
     return [
-      setIfMissing([], [...getNodePath(parent), 'children']),
-      insert([data], 'after', [...getNodePath(parent), 'children', -1])
+      setIfMissing({ }, [...getNodePath(parent), 'children']),
+      set('nodes', [...getNodePath(parent), 'children', 'type']),
+      setIfMissing([], [...getNodePath(parent), 'children', 'nodes']),
+      insert([data], 'after', [...getNodePath(parent), 'children', 'nodes', -1])
     ];
   }
 }
 
-export function removeNode(node: SitemapTreeNode) {
-  node.parent.children = node.parent.children.filter(n => n.key !== node.key);
+export function removeNode(node: SitemapTreePageNode) {
   if (node.parent.kind === 'root') {
-//    node.parent.data = node.parent.data.filter(n => n._key !== node.data._key);
     return unset([{_key: node.data._key}]);
   } else {
-//    node.parent.data.children = node.parent.data.children?.filter(n => n._key !== node.data._key);
     return unset(getNodePath(node));
   }
 }
 
-export function moveNode(dragNode: SitemapTreeNode, dropNode: SitemapTreeNode, info: {
-  dropToGap: boolean;
-  dropPosition: number
-}) {
+export function moveNode(dragNode: SitemapTreePageNode, dropNode: SitemapTreePageNode, dropPosition: number, dropToGap: boolean) {
 
   // Remove from parent
   const removeNodePatch = removeNode(dragNode);
 
   // Add under new Parent
-  if (!info.dropToGap) {
-    dragNode.parent = dropNode
-    dropNode.children.unshift(dragNode)
-//    dropNode.data.children = dropNode.data.children ?? [];
-//    dropNode.data.children.unshift(dragNode.data);
-
+  if (!dropToGap) {
     return [
       removeNodePatch,
-      setIfMissing([], [...getNodePath(dropNode), 'children']),
-      insert([dragNode.data], 'before', [...getNodePath(dropNode), 'children', 0])
+      setIfMissing({ type: 'nodes', nodes: []}, [...getNodePath(dropNode), 'children']),
+      setIfMissing([], [...getNodePath(dropNode), 'children', 'nodes']),
+      insert([dragNode.data], 'before', [...getNodePath(dropNode), 'children', 'nodes', 0])
     ];
   } else {
-    dragNode.parent = dropNode.parent
-
     const i = dropNode.parent.children.indexOf(dropNode)!;
-    const insertAt = info.dropPosition < 0 ? i : i + 1
+    const insertAt = dropPosition < 0 ? i : i + 1
 
-    dropNode.parent.children.splice(insertAt, 0, dragNode)
     if (dropNode.parent.kind === 'root') {
       if (insertAt === 0)
         return [removeNodePatch, insert([dragNode.data], 'before', [0])];
@@ -138,35 +129,44 @@ export function moveNode(dragNode: SitemapTreeNode, dropNode: SitemapTreeNode, i
       if (insertAt === 0)
         return [
           removeNodePatch,
-          setIfMissing([], [...getNodePath(dropNode.parent), 'children']),
-          insert([dragNode.data], 'before', [...getNodePath(dropNode.parent), 'children', 0])
+          setIfMissing({ type: 'nodes', nodes: [] }, [...getNodePath(dropNode.parent), 'children']),
+          setIfMissing([], [...getNodePath(dropNode.parent), 'children', 'nodes']),
+          insert([dragNode.data], 'before', [...getNodePath(dropNode.parent), 'children', 'nodes', 0])
         ];
       else
         return [
           removeNodePatch,
-          setIfMissing([], [...getNodePath(dropNode.parent), 'children']),
-          insert([dragNode.data], 'after', [...getNodePath(dropNode.parent), 'children', insertAt-1])
+          setIfMissing({ type: 'nodes', nodes: [] }, [...getNodePath(dropNode.parent), 'children']),
+          setIfMissing([], [...getNodePath(dropNode.parent), 'children', 'nodes']),
+          insert([dragNode.data], 'after', [...getNodePath(dropNode.parent), 'children', 'nodes', insertAt-1])
         ];
     }
   }
+}
+
+export function setChildrenCollectionType(node: SitemapTreePageNode, type: string) {
+  return set({ type: 'collection', collection: type }, [...getNodePath(node), 'children'])
 }
 
 export function updateTree(tree: SitemapTreeRoot, loadedPages: Map<string, SitemapPage>) {
   updateTreeNodes(tree.children, loadedPages)
 }
 
-function updateNode(node: SitemapTreeNode, loadedPages: Map<string, SitemapPage>) {
-  node.page = loadedPages.get(node.data.document._ref);
-  node.children && updateTreeNodes(node.children, loadedPages);
+function updateNode(node: SitemapTreePageNode, loadedPages: Map<string, SitemapPage>) {
+  if (node.data.page) {
+    node.page = loadedPages.get(node.data.page._ref);
+    node.children && updateTreeNodes(node.children, loadedPages);
+  }
 }
 
 function updateTreeNodes(nodes: SitemapTreeNode[], loadedPages: Map<string, SitemapPage>) {
   for (const node of nodes) {
-    updateNode(node, loadedPages)
+    if (node.kind !== "collection")
+      updateNode(node, loadedPages)
   }
 }
 
-export function getTreeFromNodeData(nodes: SitemapNodeData[], titleFactory: (node: SitemapTreeNode) => ReactNode, pages : Map<string, SitemapPage>) : [SitemapTreeRoot, Set<string>] {
+export function getTreeFromNodeData(nodes: SitemapNodeData[], titleFactory: (root: SitemapTreeRoot, nodeKey: string | number) => ReactNode, pages : Map<string, SitemapPage>) : [SitemapTreeRoot, Set<string>] {
   const pendingRefs = new Set<string>();
 
   const root = {
@@ -176,37 +176,48 @@ export function getTreeFromNodeData(nodes: SitemapNodeData[], titleFactory: (nod
     children: undefined,
   } as unknown as SitemapTreeRoot;
 
-  root.children = getTreeNodesFromNodeData(root, nodes, titleFactory, pendingRefs, pages);
+  root.children = getTreeNodesFromNodeData(root, nodes, node => titleFactory(root, node.key), pendingRefs, pages);
 
   return [root, pendingRefs];
 }
 
-function getTreeNodesFromNodeData(parent: SitemapTreeRoot | SitemapTreeNode, nodes: SitemapNodeData[], titleFactory: (node: SitemapTreeNode) => React.ReactNode, pendingRefs: Set<string>, pages : Map<string, SitemapPage>) {
-  return nodes.filter(n => n.document).map((n) => getTreeNodeFromNodeData(parent, n, titleFactory, pendingRefs, pages));
+function getTreeNodesFromNodeData(parent: SitemapTreeRoot | SitemapTreePageNode, nodes: SitemapNodeData[], titleFactory: (node: SitemapTreeNode) => React.ReactNode, pendingRefs: Set<string>, pages : Map<string, SitemapPage>) {
+  return nodes.filter(n => n.page).map((n) => getTreeNodeFromNodeData(parent, n, titleFactory, pendingRefs, pages));
 }
 
 function getTreeNodeFromNodeData(
   parent: SitemapTreeRoot | SitemapTreeNode,
-  node: SitemapNodeData,
+  nodeData: SitemapNodeData,
   titleFactory: (node: SitemapTreeNode) => ReactNode,
   pendingRefs: Set<string>,
   pages : Map<string, SitemapPage>): SitemapTreeNode {
 
-  const page = pages.get(node.document._ref);
+  const page = nodeData.page && pages.get(nodeData.page._ref);
   if (!page)
-    pendingRefs.add(node.document._ref);
+    pendingRefs.add(nodeData.page._ref);
 
   const treeNode = {
-    kind: 'node',
-    key: node._key,
-    data: node,
+    kind: 'page',
+    key: nodeData._key,
+    data: nodeData,
     parent: parent,
     children: undefined,
     page: page
-  } as unknown as SitemapTreeNode;
+  } as unknown as SitemapTreePageNode;
 
   treeNode.title = titleFactory;
-  treeNode.children = node.children && getTreeNodesFromNodeData(treeNode, node.children, titleFactory, pendingRefs, pages) || [];
-
+  if (nodeData.children?.type === "collection") {
+    treeNode.children = [
+      {
+        key: nanoid(10).toString(),
+        kind: 'collection',
+        collectionType: nodeData.children.collection,
+        parent: treeNode,
+        title: `Collection: ${nodeData.children.collection}`
+      }
+    ];
+  } else {
+    treeNode.children = nodeData.children && getTreeNodesFromNodeData(treeNode, nodeData.children.type === "nodes" ? nodeData.children.nodes ?? [] : [], titleFactory, pendingRefs, pages) || [];
+  }
   return treeNode
 }

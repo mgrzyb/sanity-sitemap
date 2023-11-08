@@ -1,4 +1,6 @@
 ﻿export interface SitemapPage {
   id: string,
-  title: string
+  type: string,
+  slug: string,
+  title: string,
 }

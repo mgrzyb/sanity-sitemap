@@ -1,8 +1,14 @@
 ﻿export interface SitemapNodeData {
   _key: string
-  document: {
+  page: {
     _type: string;
     _ref: string
+  },
+  children?: {
+    type: 'collection',
+    collection: string
+  } | {
+    type: 'nodes',
+    nodes: SitemapNodeData[] | undefined
   }
-  children: SitemapNodeData[] | undefined
 }

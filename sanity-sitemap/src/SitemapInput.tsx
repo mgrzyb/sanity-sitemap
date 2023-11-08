@@ -1,201 +1,101 @@
-import {
-  ArrayOfObjectsInputProps,
-  ArraySchemaType,
-  ArraySchemaTypeOf,
-  FormPatch,
-  PatchEvent,
-  SanityClient,
-  set,
-  useClient
-} from "sanity";
-import Tree from "rc-tree";
-import React, {useCallback, useEffect, useRef, useState} from "react";
-import {EventDataNode} from "rc-tree/es/interface";
-import {Button, Menu, MenuButton, MenuItem} from "@sanity/ui";
+import {ArrayOfObjectsInputProps, ArraySchemaType, SchemaType, useSchema} from "sanity";
+import React, {useMemo, useState} from "react";
 import {useRouter} from "sanity/router";
-import {NodeDragEventParams} from "rc-tree/es/contextTypes";
 import {SelectPageDialog} from "./SelectPageDialog";
 import {
-  addNode, getNodeByKey,
-  getTreeFromNodeData,
+  addChildPageNode,
   moveNode,
   removeNode,
-  SitemapTreeRoot,
-  SitemapTreeNode,
-  updateTree
+  setChildrenCollectionType,
+  SitemapTreePageNode
 } from "./SitemapTreeNode";
 import {SitemapNodeData} from "./SitemapNodeData";
-import {SitemapPage} from "./SitemapPage";
 import "rc-tree/assets/index.css"
+import {SelectCollectionTypeDialog} from "./SelectCollectionTypeDialog";
+import {SitemapTree, useSitemapTree} from "./SitemapTree";
+import {useDialog, useDialogWithArg} from "./hooks";
 
-interface SitemapTreeNodeCallbacks {
-  onAddChildNode?: (node: SitemapTreeNode) => void,
-  onRemoveNode?: (treeNode: SitemapTreeNode) => void
-}
+type Props = ArrayOfObjectsInputProps<SitemapNodeData, ArraySchemaType & {
+  options?: { pageTypes: string[] }
+}>;
 
-export const SitemapInput = ({value, onChange, schemaType}: ArrayOfObjectsInputProps<SitemapNodeData, ArraySchemaType & { options?: { pageTypes: string[] }}>) => {
-  const client = useClient({apiVersion: "2021-06-07"});
+export const SitemapInput = ({ value, onChange, schemaType }: Props) => {
+
+  const [addHomePageDialog, showAddHomePageDialog] = useDialog();
+  const [addChildNodeDialog, showAddChildNodeDialog] = useDialogWithArg<SitemapTreePageNode>();
+  const [addChildrenCollectionDialog, showAddChildrenCollectionDialog] = useDialogWithArg<SitemapTreePageNode>();
+
+  const schema = useSchema();
+  const pageTypes = schemaType.options?.pageTypes ?? ['page'];
+  const collectionTypes = useMemo(() => schema.getTypeNames().filter(t => isValidCollectionSchemaType(schema.get(t))), [])
+
   const router = useRouter();
-  const loadedPages = useRef(new Map<string, SitemapPage>());
 
-  const [addingChildNode, setAddingChildNode] = useState<SitemapTreeNode | undefined>(undefined);
-  const [addingHomePage, setAddingHomePage] = useState(false);
-  const [replacingNodePage, setReplacingNodePage] = useState<SitemapTreeNode | undefined>(undefined);
-
-  const contextMenuCallbacks = {
-    onAddChildNode(node: SitemapTreeNode) {
-      setAddingChildNode(getNodeByKey(state.tree, node.key));
+  const [tree, nodes] = useSitemapTree(value, {
+    onAddChildNode: (node: SitemapTreePageNode) => {
+      showAddChildNodeDialog(node);
     },
-    onRemoveNode(node : SitemapTreeNode) {
-      const patch = removeNode(getNodeByKey(state.tree, node.key)!)
-
-      setState({...state, nodes: [...state.tree.children] });
-      onChange(patch);
-    }
-  };
-
-  const [state, setState] = useState<{ tree: SitemapTreeRoot, nodes: SitemapTreeNode[], pendingRefs: Set<string> }>(() => {
-    console.log("INITIAL State")
-    const [tree, pendingRefs] = getTreeFromNodeData(value ?? [], getNodeTitleFactory(contextMenuCallbacks), loadedPages.current);
-
-    return {
-      tree: tree,
-      nodes: tree.children,
-      pendingRefs: pendingRefs
+    onRemoveNode: (node: SitemapTreePageNode) => {
+      onChange(removeNode(node));
+    },
+    onAddChildrenCollection: (node: SitemapTreePageNode) => {
+      if (node.data.children?.type === "nodes" && node.data.children.nodes?.length) {
+        if (!confirm("Remove existing children?"))
+          return;
+      }
+      showAddChildrenCollectionDialog(node);
     }
   });
 
-  useEffect(() => {
-    console.log("Value CHANGED")
-    const [tree, pendingRefs] = getTreeFromNodeData(value ?? [], getNodeTitleFactory(contextMenuCallbacks), loadedPages.current);
-    setState({
-      tree: tree,
-      nodes: [...tree.children],
-      pendingRefs: pendingRefs
-    })
-  }, [value]);
-
-  console.log("RERENDER: value === state.tree.data: ", value === state.tree.data)
-
-  useEffect(() => {
-    if (state.pendingRefs.size === 0)
-      return;
-    const refsToLoad = [...state.pendingRefs].filter(r => !loadedPages.current.has(r));
-    if (refsToLoad.length === 0)
-      return;
-
-    console.log("LOADING pendingRefs")
-
-    loadPages(refsToLoad, client)
-      .then(pages => {
-        for (const d of pages) {
-          loadedPages.current.set(d[0], d[1])
-        }
-
-        updateTree(state.tree, loadedPages.current);
-        setState({...state, nodes: [...state.tree.children]});
-      })
-  }, [state.pendingRefs]);
-
-  const onDrop = useCallback(function onDrop(info : NodeDragEventParams<SitemapTreeNode> & { dragNode: EventDataNode<SitemapTreeNode>, dropPosition: number, dropToGap: boolean }) {
-    const dropNode = getNodeByKey(state.tree, info.node.key)!;
-    const dragNode = getNodeByKey(state.tree, info.dragNode.key)!;
-
-    const patch = moveNode(dragNode, dropNode, info);
-
-    setState({
-      ...state,
-      nodes: [...state.tree.children],
-    });
-
-    onChange(patch);
-  }, [state])
-
-  const pageTypes = schemaType.options?.pageTypes ?? ['page'];
-
   return (
     <>
-      { state.nodes.length > 0 &&
-        <Tree
-          treeData={state.nodes}
-          defaultExpandAll={true}
-          selectable={false}
-          onDoubleClick={(e, node) => {
+      <SitemapTree
+        nodes={nodes}
+        onAddRoot={showAddHomePageDialog}
+        onDoubleClick={node => {
+          if (node.kind === 'page') {
             const url = router.resolvePathFromState(router.state);
-            router.navigateUrl({ path: url + ';' + getNodeByKey(state.tree, node.key)?.data?.document?._ref })
+            const data = node.data;
+            router.navigateUrl({path: url + ';' + data?.page._ref})
+          }
+        }}
+        onDrop={(dragNode, dropNode, dropPosition, dropToGap) => {
+          onChange(moveNode(dragNode, dropNode, dropPosition, dropToGap));
+        }}/>
+
+      {addHomePageDialog &&
+        <SelectPageDialog
+          pageTypes={pageTypes}
+          onSelect={page => {
+            onChange(addChildPageNode(tree, page));
           }}
-          draggable={true}
-          onDrop={onDrop}
+          onClose={addHomePageDialog.hide}
         />}
 
-      { state.nodes.length === 0 &&
-        <Button onClick={() => setAddingHomePage(true)}>Add home page</Button>
+      {addChildNodeDialog &&
+        <SelectPageDialog
+          pageTypes={pageTypes}
+          onSelect={doc => {
+            onChange(addChildPageNode(addChildNodeDialog.arg, doc));
+          }}
+          onClose={addChildNodeDialog.hide}
+        />}
+
+      {addChildrenCollectionDialog &&
+        <SelectCollectionTypeDialog
+          availableTypes={collectionTypes}
+          onSelect={type => {
+            onChange(setChildrenCollectionType(addChildrenCollectionDialog.arg, type));
+          }}
+          onClose={addChildrenCollectionDialog.hide}
+        />
       }
-
-      { addingHomePage &&
-        <SelectPageDialog
-          pageTypes={pageTypes}
-          onSelect={doc => {
-            const patch = addNode(state.tree, doc, getNodeTitleFactory(contextMenuCallbacks));
-            setState({
-              ...state,
-              nodes: [...state.tree.children],
-            });
-            onChange(patch);
-          }}
-          onClose={() => setAddingHomePage(false)}
-        />}
-
-      { addingChildNode &&
-        <SelectPageDialog
-          pageTypes={pageTypes}
-          onSelect={doc => {
-            const patch = addNode(addingChildNode, doc, getNodeTitleFactory(contextMenuCallbacks));
-            setState({
-              ...state,
-              nodes: [...state.tree.children],
-            });
-            onChange(patch);
-          }}
-          onClose={() => setAddingChildNode(undefined)}
-        />}
-    </>
-  )
-
+    </>)
 }
 
-function getNodeTitleFactory(callbacks: SitemapTreeNodeCallbacks) {
-  return function (node : SitemapTreeNode) {
-    return <span>{node.page?.title ?? '???'} {createMenuButton(node, callbacks)}</span>
-  }
+function isValidCollectionSchemaType(type : SchemaType | undefined) {
+  if (!type) return undefined;
+  if (type.name === "sitemap") return false;
+  if (type.type?.name !== "document") return false;
+  return true;
 }
-
-function createMenuButton(treeNode: SitemapTreeNode, callbacks?: {
-  onAddChildNode?: ((node: SitemapTreeNode) => void) | undefined;
-  onRemoveNode?: ((treeNode: SitemapTreeNode) => void) | undefined
-}) {
-  const menu = (
-    <Menu padding={3}>
-      <MenuItem onClick={() => callbacks?.onRemoveNode?.(treeNode)}>Remove</MenuItem>
-      <MenuItem onClick={() => callbacks?.onAddChildNode?.(treeNode)}>Add child</MenuItem>
-    </Menu>);
-
-  return <MenuButton
-    id={`menu-${treeNode.key}`}
-    button={<span>...</span>}
-    menu={menu}/>;
-}
-
-async function loadPages(refs: Iterable<string>, client: SanityClient) {
-  const pages = await client.fetch("*[_id in $refs]{ _id, title }", {
-    refs: [...refs],
-  })
-
-  const m = new Map<string, SitemapPage>()
-  for (const d of pages) {
-    m.set(d._id, {id: d._id, title: d.title})
-  }
-
-  return m
-}
-

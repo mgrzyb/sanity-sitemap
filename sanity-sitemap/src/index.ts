@@ -1,5 +1,6 @@
 import {definePlugin, PluginOptions, RuleDef} from 'sanity'
-import { SitemapInput } from './SitemapInput';
+import {SitemapInput} from './SitemapInput';
+
 //export * from "./SitemapPane";
 
 
@@ -7,33 +8,72 @@ interface MyPluginConfig {
   pageTypes: string[]
 }
 
-export const sanitySitemap = definePlugin<MyPluginConfig>((config)  => {
+export const sanitySitemap = definePlugin<MyPluginConfig>((config) => {
   return {
     name: 'sanity-sitemap',
     schema: {
       types: [
         {
-          title: 'Sitemap Node',
           name: 'sitemap-node',
           type: 'object',
+          title: 'Sitemap Node',
           fields: [
             {
-              title: 'Document',
-              name: 'document',
-              type: 'reference',
-              validation: rule => rule.required(),
-              to: config.pageTypes.map(t => ({type: t}))
+              name: 'target',
+              type: "object",
+              title: "Target",
+              fields: [
+                {
+                  name: 'type',
+                  title: 'Node type',
+                  type: 'string',
+                  options: { list: ['document', 'url'] }
+                },
+                {
+                  name: 'document',
+                  type: 'reference',
+                  title: 'Document',
+                  to: config.pageTypes.map(t => ({type: t}))
+                },
+                {
+                  name: 'url',
+                  type: 'url',
+                  title: 'Url'
+                },
+                {
+                  name: 'title',
+                  title: 'Title',
+                  type: 'string'
+                }
+              ]
             },
             {
-              title: 'Children',
               name: 'children',
-              type: 'array',
-              of: [{type: 'sitemap-node'}],
-            },
+              type: 'object',
+              fields: [
+                {
+                  name: 'type',
+                  type: "string",
+                  title: 'Children type',
+                  options: { list: ['nodes', 'collection'] }
+                },
+                {
+                  name: 'nodes',
+                  type: 'array',
+                  title: 'Child nodes',
+                  of: [{type: 'sitemap-node'}],
+                },
+                {
+                  name: 'collection',
+                  type: 'string',
+                  title: 'Collection'
+                }
+              ]
+            }
           ],
           preview: {
             select: {
-              title: 'document.title',
+              title: 'target.document.title',
             },
           },
         },
@@ -45,7 +85,7 @@ export const sanitySitemap = definePlugin<MyPluginConfig>((config)  => {
           liveEdit: false,
           fields: [
             {
-              title: 'Structure',
+              title: 'Roots',
               name: 'roots',
               type: 'array',
               of: [{type: 'sitemap-node'}],
