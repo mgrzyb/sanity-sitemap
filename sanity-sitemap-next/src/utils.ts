@@ -3,11 +3,12 @@ import {SitemapPage} from "./SitemapPage.js";
 import {Any, QueryParams} from "@sanity/client";
 
 // TODO: Better name - technically this returns [...ancestors, page]
-export async function fetchAncestors(
+export async function fetchAncestors<TPage extends SitemapPage>(
     fetch: FetchFunction,
     sitemapRoot: SitemapNodeData,
     pageId: string,
-    pagesCache: Map<string, SitemapPage>,
+    additionalProperties: readonly (keyof TPage)[],
+    pagesCache: Map<string, TPage>,
 ) {
     const ancestorNodes = getAncestorNodes(sitemapRoot, pageId);
     if (!ancestorNodes) return undefined;
@@ -15,7 +16,8 @@ export async function fetchAncestors(
     const pages = await fetchPagesByIds(
         fetch,
         ancestorNodes.map((n) => n.page._ref),
-        pagesCache,
+        additionalProperties,
+        pagesCache
     );
     return ancestorNodes.map((n) => pages.find((p) => p._id === n.page._ref)!);
 }
@@ -79,14 +81,29 @@ export function getAncestorNodes(sitemapRoot: SitemapNodeData, pageId: string) {
 
 type FetchFunction = <R = Any, Q = QueryParams>(query: string, params?: Q) => Promise<R>;
 
-export async function fetchPagesByIds(
+export async function fetchPageById<TPage extends SitemapPage>(fetch: FetchFunction, id: string, additionalProperties: readonly (keyof TPage)[], cache: Map<string, TPage>){
+    const pages = await fetchPagesByIds(fetch, [id], additionalProperties, cache);
+    if (pages.length)
+        return pages[0];
+    return undefined;
+}
+
+export async function fetchPagesByIds<TPage extends SitemapPage>(
     fetch: FetchFunction,
     ids: string[],
-    cache: Map<string, SitemapPage>,
+    additionalProperties: readonly (keyof TPage)[],
+    cache: Map<string, TPage>,
 ) {
     const idsToFetch = ids.filter((id) => cache.has(id) === false);
     if (idsToFetch.length) {
-        const pages: SitemapPage[] = await fetch('*[_id in $ids]{ _id, "slug": slug.current, title }', {
+        const properties = [
+            `_id`,
+            `_type`,
+            `"slug": slug.current`,
+            `title`,
+            ...additionalProperties
+        ]
+        const pages: TPage[] = await fetch(`*[_id in $ids]{ ${properties.join(", ")} }`, {
             ids: idsToFetch,
         });
         for (const page of pages) {
@@ -96,13 +113,22 @@ export async function fetchPagesByIds(
     return ids.map((id) => cache.get(id)!);
 }
 
-export async function fetchPagesBySlugs(
+export async function fetchPagesBySlugs<TPage extends SitemapPage>(
     fetch: FetchFunction,
-    pageTypes: string[],
-    slugs: string[],
+    pageTypes: readonly string[],
+    slugs: readonly string[],
+    additionalProperties: readonly (keyof TPage)[]
 ) {
+    const properties = [
+        `_id`,
+        `_type`,
+        `"slug": slug.current`,
+        `title`,
+        ...additionalProperties
+    ]
+
     const pages: SitemapPage[] = await fetch(
-        '*[_type in $pageTypes && slug.current in $slugs]{ _id, "slug": slug.current, title }',
+        `*[_type in $pageTypes && slug.current in $slugs]{ ${properties.join(", ")} }`,
         {pageTypes: pageTypes, slugs: slugs},
     );
 
