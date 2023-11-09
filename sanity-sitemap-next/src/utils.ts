@@ -2,15 +2,14 @@
 import {SitemapPage} from "./SitemapPage.js";
 import {Any, QueryParams} from "@sanity/client";
 
-// TODO: Better name - technically this returns [...ancestors, page]
 export async function fetchAncestors<TPage extends SitemapPage>(
     fetch: FetchFunction,
     sitemapRoot: SitemapNodeData,
-    pageId: string,
+    page: SitemapPage,
     additionalProperties: readonly (keyof TPage)[],
     pagesCache: Map<string, TPage>,
 ) {
-    const ancestorNodes = getAncestorNodes(sitemapRoot, pageId);
+    const ancestorNodes = getAncestorNodes(sitemapRoot, page._id, page._type);
     if (!ancestorNodes) return undefined;
 
     const pages = await fetchPagesByIds(
@@ -31,21 +30,31 @@ export function matchSitemapSegments(
     const matchedPath: SitemapPage[] = [homePage];
     const remainingSegments = [...segments];
 
-    let nodes = sitemapRoot.children.type === "nodes" ? sitemapRoot.children.nodes : [];
+    let parent = sitemapRoot;
     for (const segment of segments) {
         const pageCandidates = pages.filter((p) => p.slug.toLowerCase() === segment.toLowerCase());
         if (!pageCandidates.length) break;
 
         let matched = false;
-        for (const page of pageCandidates) {
-            const node = nodes.find((n) => n.page._ref === page._id);
-            if (!node) continue;
+        if (parent.children.type === "nodes") {
+            for (const page of pageCandidates) {
+                const node = parent.children.nodes.find((n) => n.page._ref === page._id);
+                if (!node) continue;
 
-            matched = true;
-            matchedPath.push(page);
-            remainingSegments.splice(0, 1);
-            nodes = node.children.type === "nodes" ? node.children.nodes : [];
-            break;
+                matched = true;
+                matchedPath.push(page);
+                remainingSegments.splice(0, 1);
+                parent = node;
+                break;
+            }
+        } else {
+            for (const page of pageCandidates) {
+                if (parent.children.collection === page._type) {
+                    matchedPath.push(page);
+                    remainingSegments.splice(0, 1);
+                    break;                    
+                }
+            }
         }
         
         if (!matched)
@@ -58,23 +67,27 @@ export function matchSitemapSegments(
     };
 }
 
-export function getAncestorNodes(sitemapRoot: SitemapNodeData, pageId: string) {
-    function findNode(
-        nodes: SitemapNodeData[],
-        predicate: (node: SitemapNodeData) => boolean,
-        path: SitemapNodeData[] = [],
+export function getAncestorNodes(sitemapRoot: SitemapNodeData, pageId: string, pageType: string) {
+    function findPathToPage(
+        node: SitemapNodeData,
+        pageId: string, pageType: string,
+        pathSoFar: SitemapNodeData[] = [],
     ): SitemapNodeData[] | undefined {
-        for (const n of nodes) {
-            if (predicate(n)) return [...path, n];
-            const r = n.children.type === "nodes" && findNode(n.children.nodes, predicate, [...path, n]);
-            if (r) return r;
+        if (node.page._ref === pageId) return pathSoFar;
+        if (node.children.type === "collection") {
+            if (node.children.collection === pageType) return [...pathSoFar, node];
+        } else {
+            for (const n of node.children.nodes) {
+                const r = findPathToPage(n, pageId, pageType, [...pathSoFar, node]);
+                if (r) return r;
+            }
         }
         return undefined;
     }
 
     if (sitemapRoot.page._ref === pageId) return [];
 
-    const path = findNode(sitemapRoot.children.type === "nodes" ? sitemapRoot.children.nodes : [], (n) => n.page._ref === pageId);
+    const path = findPathToPage(sitemapRoot, pageId, pageType, []);
 
     return path ? [sitemapRoot, ...path] : undefined;
 }
@@ -90,12 +103,12 @@ export async function fetchPageById<TPage extends SitemapPage>(fetch: FetchFunct
 
 export async function fetchPagesByIds<TPage extends SitemapPage>(
     fetch: FetchFunction,
-    ids: string[],
+    ids: readonly string[],
     additionalProperties: readonly (keyof TPage)[],
     cache: Map<string, TPage>,
 ) {
-    const idsToFetch = ids.filter((id) => cache.has(id) === false);
-    if (idsToFetch.length) {
+    const idsToFetch = new Set(ids.filter((id) => cache.has(id) === false));
+    if (idsToFetch.size) {
         const properties = [
             `_id`,
             `_type`,
@@ -104,7 +117,7 @@ export async function fetchPagesByIds<TPage extends SitemapPage>(
             ...additionalProperties
         ]
         const pages: TPage[] = await fetch(`*[_id in $ids]{ ${properties.join(", ")} }`, {
-            ids: idsToFetch,
+            ids: [...idsToFetch],
         });
         for (const page of pages) {
             cache.set(page._id, page);
@@ -115,7 +128,6 @@ export async function fetchPagesByIds<TPage extends SitemapPage>(
 
 export async function fetchPagesBySlugs<TPage extends SitemapPage>(
     fetch: FetchFunction,
-    pageTypes: readonly string[],
     slugs: readonly string[],
     additionalProperties: readonly (keyof TPage)[]
 ) {
@@ -128,8 +140,8 @@ export async function fetchPagesBySlugs<TPage extends SitemapPage>(
     ]
 
     const pages: SitemapPage[] = await fetch(
-        `*[_type in $pageTypes && slug.current in $slugs]{ ${properties.join(", ")} }`,
-        {pageTypes: pageTypes, slugs: slugs},
+        `*[slug.current in $slugs]{ ${properties.join(", ")} }`,
+        {slugs: slugs},
     );
 
     return pages;
